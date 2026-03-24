@@ -1,0 +1,7 @@
+{
+  "dedupeTtlMs": 8000,
+  "titles": {
+    "DecisionRequired": "需要你做决策",
+    "TaskCompleted": "任务已完成"
+  }
+}
