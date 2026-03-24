@@ -22,7 +22,7 @@ describe('hook command', () => {
 
   it('passes sender and activate bundle IDs for each agent', async () => {
     const notify = vi.fn().mockResolvedValue(undefined);
-    const run = createHookRunner({ notify, now: () => 1000 });
+    const run = createHookRunner({ notify, now: () => 1000, bundleId: 'com.anthropic.claudefordesktop' });
 
     await run({
       agent: 'claude',
@@ -40,7 +40,7 @@ describe('hook command', () => {
 
   it('passes Terminal bundle ID for codex agent', async () => {
     const notify = vi.fn().mockResolvedValue(undefined);
-    const run = createHookRunner({ notify, now: () => 1000 });
+    const run = createHookRunner({ notify, now: () => 1000, bundleId: 'com.apple.Terminal' });
 
     await run({
       agent: 'codex',

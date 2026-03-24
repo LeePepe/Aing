@@ -9,6 +9,7 @@ import { parseCodexEvent } from '../adapters/codex.js';
 import { parseCopilotEvent } from '../adapters/copilot.js';
 import { parseOpencodeEvent } from '../adapters/opencode.js';
 import { Deduper } from '../dedupe.js';
+import { sendBarkNotification } from '../notifier/bark.js';
 import { sendMacNotification } from '../notifier/macos.js';
 import type { NotifyInput } from '../notifier/macos.js';
 import type { AdapterResult, AgentName, NormalizedEvent } from '../types.js';
@@ -47,6 +48,8 @@ export interface HookArgs {
 
 interface HookRunnerDeps {
   notify?: (input: NotifyInput) => Promise<void>;
+  barkKey?: string;
+  bundleId?: string;
   now?: () => number;
   dedupeTtlMs?: number;
   dedupeStorePath?: string | null;
@@ -87,6 +90,7 @@ function parsePayload(payload?: string): unknown {
 
 export function createHookRunner(deps: HookRunnerDeps = {}) {
   const notify = deps.notify ?? sendMacNotification;
+  const barkKey = deps.barkKey ?? process.env.AING_BARK_KEY;
   const now = deps.now ?? (() => Date.now());
   const dedupeTtlMs = deps.dedupeTtlMs ?? defaults.dedupeTtlMs;
   const deduper = new Deduper(dedupeTtlMs, now);
@@ -144,14 +148,20 @@ export function createHookRunner(deps: HookRunnerDeps = {}) {
       return;
     }
 
-    const bundleId = await resolveTerminalBundleId();
+    const bundleId = deps.bundleId ?? await resolveTerminalBundleId();
 
-    await notify({
-      title: `${args.agent} · ${toBody(result.event)}`,
-      body: result.message ? truncate(result.message, 100) : toBody(result.event),
-      sender: bundleId,
-      activate: bundleId
-    });
+    const title = `${args.agent} · ${toBody(result.event)}`;
+    const body = result.message ? truncate(result.message, 100) : toBody(result.event);
+
+    const promises: Promise<void>[] = [
+      notify({ title, body, sender: bundleId, activate: bundleId })
+    ];
+
+    if (barkKey) {
+      promises.push(sendBarkNotification({ key: barkKey, title, body }));
+    }
+
+    await Promise.all(promises);
   };
 }
 
