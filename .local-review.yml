@@ -1,0 +1,15 @@
+extends: false
+auto_fix: true
+provider: codex
+model: gpt-5.4-codex
+fail_on: error
+
+commit:
+  reviewers:
+    parallel: true
+    fail_on: error
+    agents:
+      - id: performance
+        model: gpt-5.4-codex
+      - id: code_quality
+        model: gpt-5.4-codex
