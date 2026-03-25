@@ -22,10 +22,14 @@ const FALLBACK_BUNDLE_ID = 'com.apple.Terminal';
 const TERM_PROGRAM_APP_NAMES: Record<string, string> = {
   'iTerm.app': 'iTerm2',
   'Apple_Terminal': 'Terminal',
-  'WarpTerminal': 'Warp'
+  'WarpTerminal': 'Warp',
+  'Superset': 'Superset'
 };
 
 async function resolveTerminalBundleId(): Promise<string> {
+  const explicitId = process.env.AING_BUNDLE_ID;
+  if (explicitId) return explicitId;
+
   const termProgram = process.env.TERM_PROGRAM;
   if (!termProgram) return FALLBACK_BUNDLE_ID;
 
@@ -69,12 +73,28 @@ function truncate(text: string, maxLen: number): string {
   return text.length > maxLen ? text.slice(0, maxLen) + '…' : text;
 }
 
-function toBody(event: NormalizedEvent): string {
+const RESPONSE_FIELDS = ['result', 'response', 'output', 'content', 'text'] as const;
+
+function extractResponsePreview(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const p = payload as Record<string, unknown>;
+  for (const field of RESPONSE_FIELDS) {
+    const val = p[field];
+    if (typeof val === 'string' && val.trim()) {
+      return truncate(val.trim(), 20);
+    }
+  }
+  return null;
+}
+
+function toBody(event: NormalizedEvent, payload?: unknown): string {
   if (event === 'DecisionRequired') {
     return defaults.titles.DecisionRequired;
   }
 
-  return defaults.titles.TaskCompleted;
+  const base = defaults.titles.TaskCompleted;
+  const preview = extractResponsePreview(payload);
+  return preview ? `${base} · ${preview}` : base;
 }
 
 function parsePayload(payload?: string): unknown {
@@ -191,7 +211,7 @@ export function createHookRunner(deps: HookRunnerDeps = {}) {
     const title = project
       ? `${args.agent} · ${project} · ${toBody(result.event)}`
       : `${args.agent} · ${toBody(result.event)}`;
-    const body = result.message ? truncate(result.message, 100) : toBody(result.event);
+    const body = result.message ? truncate(result.message, 100) : toBody(result.event, payload);
 
     const promises: Promise<void>[] = [
       notify({ title, body, sender: bundleId, activate: bundleId })

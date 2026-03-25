@@ -14,8 +14,8 @@ export function parseCopilotEvent(rawEvent: string, payload?: unknown): AdapterR
 
   let event = mapRawEvent('copilot', rawEvent);
 
-  // Keep v1 conservative: preToolUse without explicit deny/allow context is still a decision signal.
-  if (rawEvent.toLowerCase() === 'pretooluse' && p.approvalRequired === false) {
+  // Only trigger a decision notification when approvalRequired is explicitly true.
+  if (rawEvent.toLowerCase() === 'pretooluse' && p.approvalRequired !== true) {
     event = null;
   }
 

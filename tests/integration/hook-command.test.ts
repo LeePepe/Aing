@@ -94,6 +94,74 @@ describe('hook command', () => {
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
+  it('TaskCompleted body includes response preview from payload result field', async () => {
+    const notify = vi.fn().mockResolvedValue(undefined);
+    const run = createHookRunner({ notify, now: () => 1000 });
+
+    await run({
+      agent: 'claude',
+      event: 'Stop',
+      payload: JSON.stringify({ session_id: 's1', id: 't1', result: 'Refactored the authentication module successfully' })
+    });
+
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: '任务已完成 · Refactored the authe…'
+      })
+    );
+  });
+
+  it('TaskCompleted body checks response fields in priority order', async () => {
+    const notify = vi.fn().mockResolvedValue(undefined);
+    const run = createHookRunner({ notify, now: () => 1000 });
+
+    await run({
+      agent: 'claude',
+      event: 'Stop',
+      payload: JSON.stringify({ session_id: 's1', id: 't1', response: 'From response field', output: 'From output field' })
+    });
+
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: '任务已完成 · From response field'
+      })
+    );
+  });
+
+  it('TaskCompleted body falls back to default when no response content in payload', async () => {
+    const notify = vi.fn().mockResolvedValue(undefined);
+    const run = createHookRunner({ notify, now: () => 1000 });
+
+    await run({
+      agent: 'claude',
+      event: 'Stop',
+      payload: JSON.stringify({ session_id: 's1', id: 't1' })
+    });
+
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: '任务已完成'
+      })
+    );
+  });
+
+  it('TaskCompleted body uses result.message over response preview when present', async () => {
+    const notify = vi.fn().mockResolvedValue(undefined);
+    const run = createHookRunner({ notify, now: () => 1000 });
+
+    await run({
+      agent: 'claude',
+      event: 'Stop',
+      payload: JSON.stringify({ session_id: 's1', id: 't1', message: 'Custom message', result: 'Some result' })
+    });
+
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: 'Custom message'
+      })
+    );
+  });
+
   it('does not notify unknown events', async () => {
     const notify = vi.fn().mockResolvedValue(undefined);
     const run = createHookRunner({ notify, now: () => 1000 });

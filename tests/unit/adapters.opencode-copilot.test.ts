@@ -16,8 +16,18 @@ describe('opencode adapter', () => {
 });
 
 describe('copilot adapter', () => {
-  it('maps preToolUse to DecisionRequired', () => {
+  it('preToolUse with approvalRequired undefined returns null', () => {
     const r = parseCopilotEvent('preToolUse', { sessionId: 's2' });
+    expect(r.event).toBeNull();
+  });
+
+  it('preToolUse with approvalRequired false returns null', () => {
+    const r = parseCopilotEvent('preToolUse', { sessionId: 's2', approvalRequired: false });
+    expect(r.event).toBeNull();
+  });
+
+  it('preToolUse with approvalRequired true returns DecisionRequired', () => {
+    const r = parseCopilotEvent('preToolUse', { sessionId: 's2', approvalRequired: true });
     expect(r.event).toBe('DecisionRequired');
   });
 
