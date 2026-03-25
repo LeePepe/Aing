@@ -11,6 +11,7 @@ type RunFn = (cmd: string, args: string[], timeoutMs: number) => Promise<boolean
 
 interface NotifyDeps {
   run?: RunFn;
+  terminalNotifierCommands?: string[];
 }
 
 async function defaultRun(cmd: string, args: string[], timeoutMs: number): Promise<boolean> {
@@ -54,15 +55,39 @@ function buildTerminalNotifierArgs(input: NotifyInput): string[] {
   return args;
 }
 
+function resolveTerminalNotifierCommands(deps: NotifyDeps): string[] {
+  if (deps.terminalNotifierCommands && deps.terminalNotifierCommands.length > 0) {
+    return deps.terminalNotifierCommands;
+  }
+
+  // In tests that inject a fake runner, keep behavior deterministic unless explicitly overridden.
+  if (deps.run) {
+    return ['terminal-notifier'];
+  }
+
+  const commands = [
+    process.env.AING_TERMINAL_NOTIFIER_PATH,
+    'terminal-notifier',
+    '/opt/homebrew/bin/terminal-notifier',
+    '/usr/local/bin/terminal-notifier'
+  ].filter((cmd): cmd is string => Boolean(cmd && cmd.trim()));
+
+  return [...new Set(commands)];
+}
+
 export async function sendMacNotification(input: NotifyInput, deps: NotifyDeps = {}): Promise<void> {
   const run = deps.run ?? defaultRun;
   const timeoutMs = 1000;
+  const terminalNotifierArgs = buildTerminalNotifierArgs(input);
+  const terminalNotifierCommands = resolveTerminalNotifierCommands(deps);
 
-  const terminalNotifierOk = await run(
-    'terminal-notifier',
-    buildTerminalNotifierArgs(input),
-    timeoutMs
-  );
+  let terminalNotifierOk = false;
+  for (const cmd of terminalNotifierCommands) {
+    terminalNotifierOk = await run(cmd, terminalNotifierArgs, timeoutMs);
+    if (terminalNotifierOk) {
+      break;
+    }
+  }
 
   if (terminalNotifierOk) {
     return;

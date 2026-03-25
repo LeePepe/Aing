@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { AgentName } from '../types.js';
 
 export interface BuildInvocationOptions {
@@ -134,6 +134,8 @@ export function buildInjectedInvocation(
   }
 
   if (agent === 'claude') {
+    const binDir = dirname(cmd);
+    env.PATH = env.PATH ? `${binDir}:${env.PATH}` : binDir;
     return {
       cmd,
       args: [...originalArgs, '--settings', claudeSettingsJson(options.cliPath)],

@@ -19,6 +19,25 @@ describe('sendMacNotification', () => {
     expect(run).toHaveBeenNthCalledWith(2, 'osascript', expect.any(Array), 1000);
   });
 
+  it('tries absolute terminal-notifier path before osascript fallback', async () => {
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    await sendMacNotification(
+      { title: 't', body: 'b' },
+      {
+        run,
+        terminalNotifierCommands: ['terminal-notifier', '/opt/homebrew/bin/terminal-notifier']
+      }
+    );
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenNthCalledWith(1, 'terminal-notifier', expect.any(Array), 1000);
+    expect(run).toHaveBeenNthCalledWith(2, '/opt/homebrew/bin/terminal-notifier', expect.any(Array), 1000);
+  });
+
   it('never throws when both fail', async () => {
     const run = vi.fn().mockResolvedValue(false);
     await expect(sendMacNotification({ title: 't', body: 'b' }, { run })).resolves.toBeUndefined();
