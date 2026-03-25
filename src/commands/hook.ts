@@ -2,7 +2,7 @@ import defaults from '../../config/defaults.json' with { type: 'json' };
 import { execFile } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { parseClaudeEvent } from '../adapters/claude.js';
 import { parseCodexEvent } from '../adapters/codex.js';
@@ -51,6 +51,7 @@ interface HookRunnerDeps {
   barkKey?: string;
   bundleId?: string;
   now?: () => number;
+  cwd?: string;
   dedupeTtlMs?: number;
   dedupeStorePath?: string | null;
 }
@@ -88,10 +89,47 @@ function parsePayload(payload?: string): unknown {
   }
 }
 
+function normalizeProjectName(input?: string): string | null {
+  if (!input) return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const noTrailingSlash = trimmed.replace(/[\\/]+$/, '');
+  if (!noTrailingSlash) return null;
+  const name = basename(noTrailingSlash);
+  if (!name || name === '.' || name === '/' || name === '\\') {
+    return null;
+  }
+  return name;
+}
+
+function resolveProjectName(payload: unknown, cwd: string): string | null {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const p = payload as Record<string, unknown>;
+    const directCandidates = [p.project, p.projectName, p.project_name];
+    for (const candidate of directCandidates) {
+      if (typeof candidate === 'string') {
+        const direct = normalizeProjectName(candidate);
+        if (direct) return direct;
+      }
+    }
+
+    const pathCandidates = [p.cwd, p.workspace, p.workspacePath, p.repoPath, p.path];
+    for (const candidate of pathCandidates) {
+      if (typeof candidate === 'string') {
+        const fromPath = normalizeProjectName(candidate);
+        if (fromPath) return fromPath;
+      }
+    }
+  }
+
+  return normalizeProjectName(cwd);
+}
+
 export function createHookRunner(deps: HookRunnerDeps = {}) {
   const notify = deps.notify ?? sendMacNotification;
   const barkKey = deps.barkKey ?? process.env.AING_BARK_KEY;
   const now = deps.now ?? (() => Date.now());
+  const cwd = deps.cwd ?? process.cwd();
   const dedupeTtlMs = deps.dedupeTtlMs ?? defaults.dedupeTtlMs;
   const deduper = new Deduper(dedupeTtlMs, now);
   const dedupeStorePath =
@@ -149,8 +187,10 @@ export function createHookRunner(deps: HookRunnerDeps = {}) {
     }
 
     const bundleId = deps.bundleId ?? await resolveTerminalBundleId();
-
-    const title = `${args.agent} · ${toBody(result.event)}`;
+    const project = resolveProjectName(payload, cwd);
+    const title = project
+      ? `${args.agent} · ${project} · ${toBody(result.event)}`
+      : `${args.agent} · ${toBody(result.event)}`;
     const body = result.message ? truncate(result.message, 100) : toBody(result.event);
 
     const promises: Promise<void>[] = [

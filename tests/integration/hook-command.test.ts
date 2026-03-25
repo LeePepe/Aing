@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { createHookRunner } from '../../src/commands/hook.js';
 
 describe('hook command', () => {
-  it('emits DecisionRequired notification for mapped event', async () => {
+  it('emits DecisionRequired notification with project inferred from cwd', async () => {
     const notify = vi.fn().mockResolvedValue(undefined);
-    const run = createHookRunner({ notify, now: () => 1000 });
+    const run = createHookRunner({ notify, now: () => 1000, cwd: '/Users/tianpli/Development/Aing' });
 
     await run({
       agent: 'codex',
@@ -15,7 +15,25 @@ describe('hook command', () => {
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: 'codex · 需要你做决策'
+        title: 'codex · Aing · 需要你做决策'
+      })
+    );
+  });
+
+  it('prefers project from payload over cwd when present', async () => {
+    const notify = vi.fn().mockResolvedValue(undefined);
+    const run = createHookRunner({ notify, now: () => 1000, cwd: '/Users/tianpli/Development/Aing' });
+
+    await run({
+      agent: 'claude',
+      event: 'Stop',
+      payload: JSON.stringify({ session_id: 's1', id: 't1', project: 'Financial' })
+    });
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'claude · Financial · 任务已完成'
       })
     );
   });
