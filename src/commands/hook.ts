@@ -228,9 +228,13 @@ export function createHookRunner(deps: HookRunnerDeps = {}) {
 
     // Body: for TaskCompleted, first 20 chars of last response; otherwise event label
     let body: string;
-    if (result.event === 'TaskCompleted' && result.transcriptPath) {
-      const lastText = await readLastAssistantText(result.transcriptPath);
-      body = lastText ? truncate(lastText, 20) : defaults.titles.TaskCompleted;
+    if (result.event === 'TaskCompleted') {
+      if (result.transcriptPath) {
+        const lastText = await readLastAssistantText(result.transcriptPath);
+        body = lastText ? truncate(lastText, 20) : result.message ? truncate(result.message, 20) : defaults.titles.TaskCompleted;
+      } else {
+        body = result.message ? truncate(result.message, 20) : defaults.titles.TaskCompleted;
+      }
     } else {
       body = result.message ? truncate(result.message, 100) : eventLabel;
     }
