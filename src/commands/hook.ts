@@ -107,6 +107,11 @@ function truncate(text: string, maxLen: number): string {
   return text.length > maxLen ? text.slice(0, maxLen) + '…' : text;
 }
 
+function lastSentence(text: string): string {
+  const sentences = text.split(/(?<=[。！？.!?])\s*|\n+/).map(s => s.trim()).filter(Boolean);
+  return sentences[sentences.length - 1] ?? text;
+}
+
 
 function parsePayload(payload?: string): unknown {
   if (!payload) {
@@ -231,9 +236,10 @@ export function createHookRunner(deps: HookRunnerDeps = {}) {
     if (result.event === 'TaskCompleted') {
       if (result.transcriptPath) {
         const lastText = await readLastAssistantText(result.transcriptPath);
-        body = lastText ? truncate(lastText, 20) : result.message ? truncate(result.message, 20) : defaults.titles.TaskCompleted;
+        const src = lastText ?? result.message ?? null;
+        body = src ? truncate(lastSentence(src), 20) : defaults.titles.TaskCompleted;
       } else {
-        body = result.message ? truncate(result.message, 20) : defaults.titles.TaskCompleted;
+        body = result.message ? truncate(lastSentence(result.message), 20) : defaults.titles.TaskCompleted;
       }
     } else {
       body = result.message ? truncate(result.message, 100) : eventLabel;
