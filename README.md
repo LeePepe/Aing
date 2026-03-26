@@ -64,55 +64,88 @@ node dist/src/cli.js hook --agent codex --event exec_command_approval_request --
 
 ## Agent wiring details
 
+All agents use the same approach: `install` writes directly to each agent's native config files. No shim or PATH manipulation required.
+
 ### Claude
 
-No shim required. The `install` command merges two hooks into `~/.claude/settings.json`:
+Merges two hooks into `~/.claude/settings.json`:
 
 ```json
 {
   "hooks": {
     "Stop": [
       {
-        "hooks": [{ "type": "command", "command": "node /path/to/dist/src/cli.js hook --agent claude --event Stop" }]
+        "hooks": [{ "type": "command", "command": "node /path/to/cli.js hook --agent claude --event Stop" }]
       }
     ],
     "PermissionRequest": [
       {
         "matcher": "*",
-        "hooks": [{ "type": "command", "command": "node /path/to/dist/src/cli.js hook --agent claude --event PermissionRequest" }]
+        "hooks": [{ "type": "command", "command": "node /path/to/cli.js hook --agent claude --event PermissionRequest" }]
       }
     ]
   }
 }
 ```
 
-Claude Code passes the hook payload via stdin as JSON. For `Stop`, the payload contains:
+Claude Code passes the hook payload via stdin as JSON. For `Stop`:
 
 ```json
 { "session_id": "...", "transcript_path": "/path/to/transcript.jsonl" }
 ```
 
-For `PermissionRequest`, it contains:
-
-```json
-{ "session_id": "...", "id": "...", "prompt": "Run: ls /tmp" }
-```
-
 The `Stop` hook reads `transcript_path` to extract the last assistant response and shows its first 20 characters as the notification body.
 
-To manually verify the hooks are installed:
+To verify: `cat ~/.claude/settings.json | jq '.hooks'`
 
-```bash
-cat ~/.claude/settings.json | jq '.hooks'
+### Codex
+
+Merges a Stop hook into `~/.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "node /path/to/cli.js hook --agent codex --event Stop", "timeout": 5 }]
+      }
+    ]
+  }
+}
 ```
 
-To uninstall, remove the entries added by aing-notify from `~/.claude/settings.json`.
+To verify: `cat ~/.codex/hooks.json | jq '.hooks'`
 
-### Other agents
+### OpenCode
 
-- `codex`: injects `-c features.codex_hooks=true`, writes `~/.codex/hooks.json` Stop hook, and watches Codex TUI session log for approval requests.
-- `opencode`: sets `OPENCODE_CONFIG_DIR` to a generated config dir containing a plugin that emits `permission.ask` and idle events.
-- `copilot`: generates `.github/hooks/aing-notify.json` in current working directory and a helper hook script in `~/.aing-notify/hooks/`.
+Writes a JS plugin to `~/.aing-notify/opencode/plugin/aing-notify.js` and adds to your shell profile (`~/.zshrc` / `~/.bashrc`):
+
+```sh
+export OPENCODE_CONFIG_DIR="$HOME/.aing-notify/opencode"
+```
+
+The plugin listens for `session.idle` (TaskCompleted) and `permission.ask` (DecisionRequired) events.
+
+After install, restart your shell or run `source ~/.zshrc` for the env var to take effect.
+
+### Copilot
+
+Writes two files:
+
+1. `~/.aing-notify/hooks/copilot-hook.sh` — shared hook script
+2. `.github/hooks/aing-notify.json` in the **current directory** at install time:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "sessionEnd": [{ "type": "command", "bash": "~/.aing-notify/hooks/copilot-hook.sh sessionEnd", "timeoutSec": 5 }],
+    "preToolUse": [{ "type": "command", "bash": "~/.aing-notify/hooks/copilot-hook.sh preToolUse", "timeoutSec": 5 }]
+  }
+}
+```
+
+Run `install --agents copilot` from each project that should receive Copilot notifications.
 
 ## Notification format
 

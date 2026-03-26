@@ -2,7 +2,6 @@ import { Command } from 'commander';
 import { runDoctorCommand } from './commands/doctor.js';
 import { runInstallCommand } from './commands/install.js';
 import { runHookCommand } from './commands/hook.js';
-import { runAgentCommand } from './commands/run-agent.js';
 import { runTestNotifyCommand } from './commands/test-notify.js';
 import type { AgentName } from './types.js';
 
@@ -60,20 +59,6 @@ program
       binDir: opts.binDir,
       cliPath: opts.cliPath
     });
-  });
-
-program
-  .command('run-agent')
-  .requiredOption('--agent <agent>', 'agent name')
-  .argument('[passthroughArgs...]')
-  .allowUnknownOption(true)
-  .passThroughOptions()
-  .action(async (passthroughArgs: string[] | undefined, opts) => {
-    const code = await runAgentCommand({
-      agent: parseAgent(opts.agent),
-      passthroughArgs: passthroughArgs ?? []
-    });
-    process.exitCode = code;
   });
 
 program.command('doctor').action(async () => {

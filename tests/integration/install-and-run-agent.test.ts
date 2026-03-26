@@ -3,43 +3,30 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runInstallCommand } from '../../src/commands/install.js';
-import { buildInjectedInvocation } from '../../src/shim/inject-hooks.js';
-import { findRealBinary } from '../../src/shim/find-real-binary.js';
-
-describe('findRealBinary', () => {
-  it('skips shim dir and finds next binary', () => {
-    const result = findRealBinary('codex', '/shim:/real:/other', '/shim', (p) => p === '/real/codex');
-    expect(result).toBe('/real/codex');
-  });
-
-  it('returns null when no binary found', () => {
-    const result = findRealBinary('codex', '/shim:/real', '/shim', () => false);
-    expect(result).toBeNull();
-  });
-});
-
-describe('buildInjectedInvocation', () => {
-  it('injects codex hooks config', () => {
-    const r = buildInjectedInvocation('codex', ['/usr/local/bin/codex', ['--version']], {
-      cliPath: '/tool/aing-notify.js'
-    });
-    expect(r.args.join(' ')).toContain('features.codex_hooks=true');
-  });
-
-  it('injects claude settings', () => {
-    const r = buildInjectedInvocation('claude', ['/usr/local/bin/claude', ['--print']], {
-      cliPath: '/tool/aing-notify.js'
-    });
-    expect(r.args).toContain('--settings');
-  });
-});
 
 describe('runInstallCommand', () => {
-  it('creates codex shim, writes global claude hooks, and removes legacy claude shim', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'aing-notify-'));
+  it('writes codex hooks.json with Stop hook', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aing-install-'));
+    const homeDir = join(root, 'home');
+    await mkdir(join(homeDir, '.codex'), { recursive: true });
+
+    await runInstallCommand({
+      agents: 'codex',
+      cliPath: '/tool/dist/src/cli.js',
+      homeDir
+    });
+
+    const hooksText = await readFile(join(homeDir, '.codex', 'hooks.json'), 'utf8');
+    const hooks = JSON.parse(hooksText);
+    const stopHooks = hooks.hooks?.Stop;
+    expect(Array.isArray(stopHooks)).toBe(true);
+    expect(JSON.stringify(stopHooks)).toContain('hook --agent codex --event Stop');
+  });
+
+  it('writes claude settings.json and removes legacy claude shim', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aing-install-'));
     const binDir = join(root, 'bin');
     const homeDir = join(root, 'home');
-
     await mkdir(binDir, { recursive: true });
 
     await writeFile(
@@ -49,20 +36,83 @@ describe('runInstallCommand', () => {
     );
 
     await runInstallCommand({
-      agents: 'codex,claude',
+      agents: 'claude',
       binDir,
       cliPath: '/tool/dist/src/cli.js',
       homeDir
     });
 
-    const codex = await readFile(join(binDir, 'codex'), 'utf8');
-    expect(codex).toContain('run-agent --agent codex');
-
     await expect(stat(join(binDir, 'claude'))).rejects.toThrow();
 
-    const settingsPath = join(homeDir, '.claude', 'settings.json');
-    const settingsText = await readFile(settingsPath, 'utf8');
+    const settingsText = await readFile(join(homeDir, '.claude', 'settings.json'), 'utf8');
     expect(settingsText).toContain('PermissionRequest');
     expect(settingsText).toContain('hook --agent claude --event Stop');
+  });
+
+  it('writes opencode plugin file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aing-install-'));
+    const homeDir = join(root, 'home');
+
+    await runInstallCommand({
+      agents: 'opencode',
+      cliPath: '/tool/dist/src/cli.js',
+      homeDir
+    });
+
+    const pluginText = await readFile(
+      join(homeDir, '.aing-notify', 'opencode', 'plugin', 'aing-notify.js'),
+      'utf8'
+    );
+    expect(pluginText).toContain('AingNotifyPlugin');
+    expect(pluginText).toContain('hook --agent opencode');
+  });
+
+  it('writes copilot hook script and project hook json', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aing-install-'));
+    const homeDir = join(root, 'home');
+    const cwd = join(root, 'project');
+    await mkdir(cwd, { recursive: true });
+
+    await runInstallCommand({
+      agents: 'copilot',
+      cliPath: '/tool/dist/src/cli.js',
+      homeDir,
+      cwd
+    });
+
+    const scriptText = await readFile(
+      join(homeDir, '.aing-notify', 'hooks', 'copilot-hook.sh'),
+      'utf8'
+    );
+    expect(scriptText).toContain('hook --agent copilot');
+
+    const hookJson = JSON.parse(
+      await readFile(join(cwd, '.github', 'hooks', 'aing-notify.json'), 'utf8')
+    );
+    expect(hookJson.hooks?.sessionEnd).toBeDefined();
+    expect(hookJson.hooks?.preToolUse).toBeDefined();
+  });
+
+  it('merges with existing codex hooks without replacing them', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aing-install-'));
+    const homeDir = join(root, 'home');
+    await mkdir(join(homeDir, '.codex'), { recursive: true });
+
+    const existing = {
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command', command: 'existing-hook' }] }]
+      }
+    };
+    await writeFile(join(homeDir, '.codex', 'hooks.json'), JSON.stringify(existing));
+
+    await runInstallCommand({
+      agents: 'codex',
+      cliPath: '/tool/dist/src/cli.js',
+      homeDir
+    });
+
+    const hooksText = await readFile(join(homeDir, '.codex', 'hooks.json'), 'utf8');
+    expect(hooksText).toContain('existing-hook');
+    expect(hooksText).toContain('hook --agent codex');
   });
 });

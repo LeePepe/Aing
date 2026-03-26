@@ -1,6 +1,21 @@
-import { findRealBinary } from '../shim/find-real-binary.js';
+import { accessSync, constants } from 'node:fs';
+import { join } from 'node:path';
 
 const AGENTS = ['codex', 'claude', 'opencode', 'copilot'] as const;
+
+function findInPath(name: string, pathEnv: string): string | null {
+  const dirs = pathEnv.split(':').filter(Boolean);
+  for (const dir of dirs) {
+    const full = join(dir, name);
+    try {
+      accessSync(full, constants.X_OK);
+      return full;
+    } catch {
+      // not found or not executable
+    }
+  }
+  return null;
+}
 
 export async function runDoctorCommand(): Promise<number> {
   let hasIssue = false;
@@ -11,7 +26,7 @@ export async function runDoctorCommand(): Promise<number> {
   }
 
   for (const agent of AGENTS) {
-    const found = findRealBinary(agent, process.env.PATH ?? '', process.env.AING_NOTIFY_SHIM_DIR ?? '');
+    const found = findInPath(agent, process.env.PATH ?? '');
     if (found) {
       console.log(`OK: ${agent} -> ${found}`);
     } else {
