@@ -23,6 +23,55 @@ describe('runInstallCommand', () => {
     expect(JSON.stringify(stopHooks)).toContain('hook --agent codex --event Stop');
   });
 
+  it('enables codex_hooks feature in config.toml', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aing-install-'));
+    const homeDir = join(root, 'home');
+    await mkdir(join(homeDir, '.codex'), { recursive: true });
+
+    await runInstallCommand({
+      agents: 'codex',
+      cliPath: '/tool/dist/src/cli.js',
+      homeDir
+    });
+
+    const toml = await readFile(join(homeDir, '.codex', 'config.toml'), 'utf8');
+    expect(toml).toContain('codex_hooks = true');
+  });
+
+  it('enables codex_hooks when [features] section already exists', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aing-install-'));
+    const homeDir = join(root, 'home');
+    await mkdir(join(homeDir, '.codex'), { recursive: true });
+    await writeFile(join(homeDir, '.codex', 'config.toml'), '[features]\nplugins = true\n');
+
+    await runInstallCommand({
+      agents: 'codex',
+      cliPath: '/tool/dist/src/cli.js',
+      homeDir
+    });
+
+    const toml = await readFile(join(homeDir, '.codex', 'config.toml'), 'utf8');
+    expect(toml).toContain('codex_hooks = true');
+    expect(toml).toContain('plugins = true');
+  });
+
+  it('replaces codex_hooks = false with true', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aing-install-'));
+    const homeDir = join(root, 'home');
+    await mkdir(join(homeDir, '.codex'), { recursive: true });
+    await writeFile(join(homeDir, '.codex', 'config.toml'), '[features]\ncodex_hooks = false\n');
+
+    await runInstallCommand({
+      agents: 'codex',
+      cliPath: '/tool/dist/src/cli.js',
+      homeDir
+    });
+
+    const toml = await readFile(join(homeDir, '.codex', 'config.toml'), 'utf8');
+    expect(toml).toContain('codex_hooks = true');
+    expect(toml).not.toContain('codex_hooks = false');
+  });
+
   it('writes claude settings.json and removes legacy claude shim', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aing-install-'));
     const binDir = join(root, 'bin');

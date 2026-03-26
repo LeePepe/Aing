@@ -64,9 +64,42 @@ function isAingCodexHookEntry(entry: unknown): boolean {
   });
 }
 
+async function ensureCodexFeatureEnabled(configTomlPath: string): Promise<void> {
+  let content = '';
+  try {
+    content = await readFile(configTomlPath, 'utf8');
+  } catch {
+    // file may not exist yet
+  }
+
+  // Already enabled
+  if (/^\s*codex_hooks\s*=\s*true/m.test(content)) return;
+
+  // Has codex_hooks = false → replace
+  if (/^\s*codex_hooks\s*=/m.test(content)) {
+    const updated = content.replace(/^(\s*codex_hooks\s*=\s*).*$/m, '$1true');
+    await writeFile(configTomlPath, updated, 'utf8');
+    return;
+  }
+
+  // Has [features] section → append inside it
+  if (/^\[features\]/m.test(content)) {
+    const updated = content.replace(/^(\[features\])/m, '$1\ncodex_hooks = true');
+    await writeFile(configTomlPath, updated, 'utf8');
+    return;
+  }
+
+  // No [features] section → append
+  await appendFile(configTomlPath, '\n[features]\ncodex_hooks = true\n');
+}
+
 async function ensureCodexHooks(homeDir: string, cliPath: string): Promise<void> {
   const codexConfigDir = join(homeDir, '.codex');
   await mkdir(codexConfigDir, { recursive: true });
+
+  // Enable the codex_hooks feature flag in config.toml
+  await ensureCodexFeatureEnabled(join(codexConfigDir, 'config.toml'));
+
   const hooksPath = join(codexConfigDir, 'hooks.json');
 
   let existing: Record<string, unknown> = {};
