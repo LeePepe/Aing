@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import type { AgentName } from '../types.js';
 
@@ -143,31 +143,94 @@ async function ensureOpencodePlugin(homeDir: string, cliPath: string): Promise<v
   const nodePath = JSON.stringify(process.execPath);
   const cliPathJson = JSON.stringify(cliPath);
   const pluginCode = `
-export const AingNotifyPlugin = async ({ $ }) => {
+export const AingNotifyPlugin = async ({ $, client }) => {
+  if (globalThis.__aingNotifyPluginV2) return {};
+  globalThis.__aingNotifyPluginV2 = true;
+
   const cliPath = ${cliPathJson};
   const nodePath = ${nodePath};
 
-  const trigger = async (eventName) => {
+  // Child session detection (subagents have parentID set)
+  const childSessionCache = new Map();
+  const isChildSession = async (sessionID) => {
+    if (!sessionID || !client?.session?.list) return false;
+    if (childSessionCache.has(sessionID)) return childSessionCache.get(sessionID);
     try {
-      await $\`\${nodePath} \${cliPath} hook --agent opencode --event \${eventName}\`;
+      const resp = await client.session.list();
+      const sessions = resp.data ?? resp;
+      const session = Array.isArray(sessions) ? sessions.find(s => s.id === sessionID) : null;
+      const isChild = !!session?.parentID;
+      childSessionCache.set(sessionID, isChild);
+      return isChild;
     } catch {
-      // best effort only
+      return false;
     }
+  };
+
+  // Get last assistant text from session messages
+  const getLastAssistantText = async (sessionID) => {
+    if (!sessionID || !client?.session?.messages) return null;
+    try {
+      const resp = await client.session.messages({ path: { id: sessionID } });
+      const messages = resp.data ?? resp;
+      if (!Array.isArray(messages)) return null;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        if (msg?.info?.role !== 'assistant') continue;
+        const text = (msg.parts ?? [])
+          .filter(p => p.type === 'text' && !p.synthetic && !p.ignored)
+          .map(p => p.text)
+          .join('\\n')
+          .trim();
+        if (text) return text;
+      }
+    } catch { /* best effort */ }
+    return null;
+  };
+
+  let currentState = 'idle';
+  let rootSessionID = null;
+  let stopSent = false;
+
+  const trigger = async (eventName, sessionID, lastText) => {
+    try {
+      const payloadObj = {};
+      if (sessionID) payloadObj.sessionId = sessionID;
+      if (lastText) payloadObj.message = lastText;
+      const payload = JSON.stringify(payloadObj);
+      await $\`\${nodePath} \${cliPath} hook --agent opencode --event \${eventName} --payload \${payload}\`;
+    } catch { /* best effort */ }
+  };
+
+  const handleIdle = async (sessionID, reason) => {
+    if (rootSessionID && sessionID !== rootSessionID) return;
+    if (currentState !== 'busy' || stopSent) return;
+    currentState = 'idle';
+    stopSent = true;
+    rootSessionID = null;
+    const lastText = await getLastAssistantText(sessionID);
+    await trigger('session.idle', sessionID, lastText);
   };
 
   return {
     event: async ({ event }) => {
-      if (event?.type === 'session.idle') {
-        await trigger('session.idle');
+      const sessionID = event?.properties?.sessionID;
+      if (await isChildSession(sessionID)) return;
+
+      if (event?.type === 'session.status') {
+        const status = event?.properties?.status?.type;
+        if (status === 'busy') {
+          if (!rootSessionID) rootSessionID = sessionID;
+          if (sessionID === rootSessionID) { currentState = 'busy'; stopSent = false; }
+        } else if (status === 'idle') {
+          await handleIdle(sessionID, 'session.status.idle');
+        }
       }
-      if (event?.type === 'session.status' && event?.properties?.status?.type === 'idle') {
-        await trigger('session.status.idle');
-      }
+      if (event?.type === 'session.idle') await handleIdle(sessionID, 'session.idle');
+      if (event?.type === 'session.error') await handleIdle(sessionID, 'session.error');
     },
     'permission.ask': async (_permission, output) => {
-      if (output?.status === 'ask') {
-        await trigger('permission.ask');
-      }
+      if (output?.status === 'ask') await trigger('permission.ask');
     }
   };
 };
@@ -175,7 +238,35 @@ export const AingNotifyPlugin = async ({ $ }) => {
 
   await writeFile(pluginPath, pluginCode);
 
-  // Append OPENCODE_CONFIG_DIR to shell profile if not already present
+  // Also write into any active OPENCODE_CONFIG_DIR (e.g. set by a wrapper like Superset)
+  const activeConfigDirs = new Set<string>();
+
+  // Env var set in the current process (e.g. from a wrapper script)
+  const envConfigDir = process.env.OPENCODE_CONFIG_DIR;
+  if (envConfigDir && envConfigDir !== cfgDir) {
+    activeConfigDirs.add(envConfigDir);
+  }
+
+  // Superset-specific: ~/.superset/hooks/opencode
+  const supDir = join(homeDir, '.superset', 'hooks', 'opencode');
+  try {
+    await stat(supDir);
+    if (supDir !== cfgDir) activeConfigDirs.add(supDir);
+  } catch {
+    // not present
+  }
+
+  for (const dir of activeConfigDirs) {
+    const targetPluginDir = join(dir, 'plugin');
+    try {
+      await mkdir(targetPluginDir, { recursive: true });
+      await writeFile(join(targetPluginDir, 'aing-notify.js'), pluginCode);
+    } catch {
+      // best effort
+    }
+  }
+
+  // Append OPENCODE_CONFIG_DIR to shell profile so it's set for non-wrapper invocations
   const shell = process.env.SHELL ?? '';
   let profileName: string;
   if (shell.endsWith('zsh')) {
