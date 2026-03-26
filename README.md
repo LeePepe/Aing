@@ -64,8 +64,53 @@ node dist/src/cli.js hook --agent codex --event exec_command_approval_request --
 
 ## Agent wiring details
 
+### Claude
+
+No shim required. The `install` command merges two hooks into `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "node /path/to/dist/src/cli.js hook --agent claude --event Stop" }]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "node /path/to/dist/src/cli.js hook --agent claude --event PermissionRequest" }]
+      }
+    ]
+  }
+}
+```
+
+Claude Code passes the hook payload via stdin as JSON. For `Stop`, the payload contains:
+
+```json
+{ "session_id": "...", "transcript_path": "/path/to/transcript.jsonl" }
+```
+
+For `PermissionRequest`, it contains:
+
+```json
+{ "session_id": "...", "id": "...", "prompt": "Run: ls /tmp" }
+```
+
+The `Stop` hook reads `transcript_path` to extract the last assistant response and shows its first 20 characters as the notification body.
+
+To manually verify the hooks are installed:
+
+```bash
+cat ~/.claude/settings.json | jq '.hooks'
+```
+
+To uninstall, remove the entries added by aing-notify from `~/.claude/settings.json`.
+
+### Other agents
+
 - `codex`: injects `-c features.codex_hooks=true`, writes `~/.codex/hooks.json` Stop hook, and watches Codex TUI session log for approval requests.
-- `claude`: writes global hooks to `~/.claude/settings.json` for `Stop` and `PermissionRequest` (no Claude shim).
 - `opencode`: sets `OPENCODE_CONFIG_DIR` to a generated config dir containing a plugin that emits `permission.ask` and idle events.
 - `copilot`: generates `.github/hooks/aing-notify.json` in current working directory and a helper hook script in `~/.aing-notify/hooks/`.
 
