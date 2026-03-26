@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { AgentName } from '../types.js';
 
@@ -88,6 +88,41 @@ export const AingNotifyPlugin = async ({ $ }) => {
   return cfgDir;
 }
 
+async function ensureCodexHooksJson(homeDir: string, cliPath: string): Promise<void> {
+  const codexConfigDir = join(homeDir, '.codex');
+  await mkdir(codexConfigDir, { recursive: true });
+  const hooksPath = join(codexConfigDir, 'hooks.json');
+
+  let existing: Record<string, unknown> = {};
+  try {
+    existing = JSON.parse(await readFile(hooksPath, 'utf8')) as Record<string, unknown>;
+  } catch {
+    // no existing file
+  }
+
+  const cmd = `${q(process.execPath)} ${q(cliPath)} hook --agent codex --event Stop`;
+  const aingHook = { type: 'command', command: cmd, timeout: 5 };
+
+  const existingHooks = (existing.hooks ?? {}) as Record<string, unknown[]>;
+  const existingStop = Array.isArray(existingHooks.Stop) ? existingHooks.Stop : [];
+  const filteredStop = existingStop.filter(
+    (h) =>
+      !Array.isArray((h as { hooks?: unknown[] }).hooks) ||
+      !(h as { hooks: { command?: string }[] }).hooks.some((hh) =>
+        hh.command?.includes('aing-notify')
+      )
+  );
+
+  await writeFile(
+    hooksPath,
+    JSON.stringify(
+      { ...existing, hooks: { ...existingHooks, Stop: [...filteredStop, { hooks: [aingHook] }] } },
+      null,
+      2
+    )
+  );
+}
+
 function claudeSettingsJson(cliPath: string): string {
   const cmd = `${q(process.execPath)} ${q(cliPath)} hook --agent claude`;
 
@@ -115,21 +150,21 @@ export function buildInjectedInvocation(
   const cwd = options.cwd ?? process.cwd();
 
   if (agent === 'codex') {
-    const notify =
-      `notify=[${JSON.stringify(process.execPath)},${JSON.stringify(options.cliPath)},` +
-      `"hook","--agent","codex","--event","agent-turn-complete"]`;
     if (!env.CODEX_TUI_RECORD_SESSION) {
       env.CODEX_TUI_RECORD_SESSION = '1';
     }
-
     if (!env.CODEX_TUI_SESSION_LOG_PATH) {
       env.CODEX_TUI_SESSION_LOG_PATH = join('/tmp', `aing-notify-codex-${process.pid}-${Date.now()}.jsonl`);
     }
 
     return {
       cmd,
-      args: ['-c', notify, ...originalArgs],
-      env
+      args: ['-c', 'features.codex_hooks=true', ...originalArgs],
+      env,
+      prepare: async () => {
+        if (!homeDir) return;
+        await ensureCodexHooksJson(homeDir, options.cliPath);
+      }
     };
   }
 

@@ -1,8 +1,10 @@
 import defaults from '../../config/defaults.json' with { type: 'json' };
 import { execFile } from 'node:child_process';
+import { createReadStream } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import { parseClaudeEvent } from '../adapters/claude.js';
 import { parseCodexEvent } from '../adapters/codex.js';
@@ -12,7 +14,7 @@ import { Deduper } from '../dedupe.js';
 import { sendBarkNotification } from '../notifier/bark.js';
 import { sendMacNotification } from '../notifier/macos.js';
 import type { NotifyInput } from '../notifier/macos.js';
-import type { AdapterResult, AgentName, NormalizedEvent } from '../types.js';
+import type { AdapterResult, AgentName } from '../types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -27,9 +29,6 @@ const TERM_PROGRAM_APP_NAMES: Record<string, string> = {
 };
 
 async function resolveTerminalBundleId(): Promise<string> {
-  const explicitId = process.env.AING_BUNDLE_ID;
-  if (explicitId) return explicitId;
-
   const termProgram = process.env.TERM_PROGRAM;
   if (!termProgram) return FALLBACK_BUNDLE_ID;
 
@@ -44,6 +43,40 @@ async function resolveTerminalBundleId(): Promise<string> {
   }
 }
 
+function resolveTerminalAppName(): string {
+  const termProgram = process.env.TERM_PROGRAM;
+  if (!termProgram) return '';
+  return TERM_PROGRAM_APP_NAMES[termProgram] ?? termProgram;
+}
+
+async function readLastAssistantText(transcriptPath: string): Promise<string | null> {
+  try {
+    let lastText: string | null = null;
+    const rl = createInterface({ input: createReadStream(transcriptPath), crlfDelay: Infinity });
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line) as Record<string, unknown>;
+        if (obj.type !== 'assistant') continue;
+        const msg = obj.message as Record<string, unknown> | undefined;
+        const content = msg?.content;
+        if (!Array.isArray(content)) continue;
+        for (const c of content) {
+          if (typeof c === 'object' && c !== null && (c as Record<string, unknown>).type === 'text') {
+            const text = ((c as Record<string, unknown>).text as string | undefined)?.trim();
+            if (text) lastText = text;
+          }
+        }
+      } catch {
+        // skip malformed lines
+      }
+    }
+    return lastText;
+  } catch {
+    return null;
+  }
+}
+
 export interface HookArgs {
   agent: AgentName;
   event: string;
@@ -53,7 +86,8 @@ export interface HookArgs {
 interface HookRunnerDeps {
   notify?: (input: NotifyInput) => Promise<void>;
   barkKey?: string;
-  bundleId?: string;
+  /** bundle ID used for -activate (which app opens on click) */
+  activateBundleId?: string;
   now?: () => number;
   cwd?: string;
   dedupeTtlMs?: number;
@@ -73,29 +107,6 @@ function truncate(text: string, maxLen: number): string {
   return text.length > maxLen ? text.slice(0, maxLen) + '…' : text;
 }
 
-const RESPONSE_FIELDS = ['result', 'response', 'output', 'content', 'text'] as const;
-
-function extractResponsePreview(payload: unknown): string | null {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  const p = payload as Record<string, unknown>;
-  for (const field of RESPONSE_FIELDS) {
-    const val = p[field];
-    if (typeof val === 'string' && val.trim()) {
-      return truncate(val.trim(), 20);
-    }
-  }
-  return null;
-}
-
-function toBody(event: NormalizedEvent, payload?: unknown): string {
-  if (event === 'DecisionRequired') {
-    return defaults.titles.DecisionRequired;
-  }
-
-  const base = defaults.titles.TaskCompleted;
-  const preview = extractResponsePreview(payload);
-  return preview ? `${base} · ${preview}` : base;
-}
 
 function parsePayload(payload?: string): unknown {
   if (!payload) {
@@ -173,11 +184,9 @@ export function createHookRunner(deps: HookRunnerDeps = {}) {
       cache = {};
     }
 
-    for (const [k, at] of Object.entries(cache)) {
-      if (ts - at >= dedupeTtlMs) {
-        delete cache[k];
-      }
-    }
+    cache = Object.fromEntries(
+      Object.entries(cache).filter(([, at]) => ts - at < dedupeTtlMs)
+    );
 
     if (cache[key] && ts - cache[key] < dedupeTtlMs) {
       return false;
@@ -206,15 +215,30 @@ export function createHookRunner(deps: HookRunnerDeps = {}) {
       return;
     }
 
-    const bundleId = deps.bundleId ?? await resolveTerminalBundleId();
+    const activateId = deps.activateBundleId ?? await resolveTerminalBundleId();
+    const appName = resolveTerminalAppName();
     const project = resolveProjectName(payload, cwd);
-    const title = project
-      ? `${args.agent} · ${project} · ${toBody(result.event)}`
-      : `${args.agent} · ${toBody(result.event)}`;
-    const body = result.message ? truncate(result.message, 100) : toBody(result.event, payload);
+
+    // Title: Aing · app · agent · task type
+    const eventLabel = result.event === 'DecisionRequired'
+      ? defaults.titles.DecisionRequired
+      : defaults.titles.TaskCompleted;
+    const titleParts = ['Aing', appName, args.agent, eventLabel].filter(Boolean);
+    const title = titleParts.join(' · ');
+
+    // Body: for TaskCompleted, first 20 chars of last response; otherwise event label
+    let body: string;
+    if (result.event === 'TaskCompleted' && result.transcriptPath) {
+      const lastText = await readLastAssistantText(result.transcriptPath);
+      body = lastText ? truncate(lastText, 20) : defaults.titles.TaskCompleted;
+    } else {
+      body = result.message ? truncate(result.message, 100) : eventLabel;
+    }
+
+    const group = `aing-${args.agent}-${project ?? 'unknown'}`;
 
     const promises: Promise<void>[] = [
-      notify({ title, body, sender: bundleId, activate: bundleId })
+      notify({ title, body, activate: activateId, group })
     ];
 
     if (barkKey) {

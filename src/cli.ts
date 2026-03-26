@@ -6,6 +6,17 @@ import { runAgentCommand } from './commands/run-agent.js';
 import { runTestNotifyCommand } from './commands/test-notify.js';
 import type { AgentName } from './types.js';
 
+async function readStdin(): Promise<string> {
+  return new Promise((resolve) => {
+    let data = '';
+    const timer = setTimeout(() => resolve(data), 500);
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => { data += chunk; });
+    process.stdin.on('end', () => { clearTimeout(timer); resolve(data); });
+    process.stdin.on('error', () => { clearTimeout(timer); resolve(data); });
+  });
+}
+
 const AGENTS: AgentName[] = ['codex', 'claude', 'opencode', 'copilot'];
 
 function parseAgent(value: string): AgentName {
@@ -27,10 +38,14 @@ program
   .requiredOption('--event <event>', 'raw event')
   .option('--payload <payload>', 'raw JSON payload')
   .action(async (payloadArg, opts) => {
+    let payload: string | undefined = opts.payload ?? payloadArg;
+    if (!payload && !process.stdin.isTTY) {
+      payload = (await readStdin()).trim() || undefined;
+    }
     await runHookCommand({
       agent: parseAgent(opts.agent),
       event: opts.event,
-      payload: opts.payload ?? payloadArg
+      payload
     });
   });
 

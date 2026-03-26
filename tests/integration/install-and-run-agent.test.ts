@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -19,11 +19,11 @@ describe('findRealBinary', () => {
 });
 
 describe('buildInjectedInvocation', () => {
-  it('injects codex notify config', () => {
+  it('injects codex hooks config', () => {
     const r = buildInjectedInvocation('codex', ['/usr/local/bin/codex', ['--version']], {
       cliPath: '/tool/aing-notify.js'
     });
-    expect(r.args.join(' ')).toContain('notify=[');
+    expect(r.args.join(' ')).toContain('features.codex_hooks=true');
   });
 
   it('injects claude settings', () => {
@@ -35,20 +35,34 @@ describe('buildInjectedInvocation', () => {
 });
 
 describe('runInstallCommand', () => {
-  it('creates executable shims for selected agents', async () => {
+  it('creates codex shim, writes global claude hooks, and removes legacy claude shim', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aing-notify-'));
     const binDir = join(root, 'bin');
+    const homeDir = join(root, 'home');
+
+    await mkdir(binDir, { recursive: true });
+
+    await writeFile(
+      join(binDir, 'claude'),
+      '#!/bin/sh\nAING_NOTIFY_SHIM_DIR="/tmp"\nexec node cli.js run-agent --agent claude -- "$@"\n',
+      { mode: 0o755 }
+    );
 
     await runInstallCommand({
       agents: 'codex,claude',
       binDir,
-      cliPath: '/tool/dist/src/cli.js'
+      cliPath: '/tool/dist/src/cli.js',
+      homeDir
     });
 
     const codex = await readFile(join(binDir, 'codex'), 'utf8');
     expect(codex).toContain('run-agent --agent codex');
 
-    const mode = await stat(join(binDir, 'claude'));
-    expect((mode.mode & 0o111) > 0).toBe(true);
+    await expect(stat(join(binDir, 'claude'))).rejects.toThrow();
+
+    const settingsPath = join(homeDir, '.claude', 'settings.json');
+    const settingsText = await readFile(settingsPath, 'utf8');
+    expect(settingsText).toContain('PermissionRequest');
+    expect(settingsText).toContain('hook --agent claude --event Stop');
   });
 });

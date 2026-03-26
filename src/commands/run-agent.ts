@@ -11,8 +11,34 @@ export interface RunAgentArgs {
   passthroughArgs: string[];
 }
 
+const SHIM_DEPTH_ENV = 'AING_NOTIFY_SHIM_DEPTH';
+const SKIP_DIRS_ENV = 'AING_NOTIFY_SKIP_BIN_DIRS';
+const MAX_SHIM_DEPTH = 6;
+
 function cliPath(): string {
   return resolve(dirname(process.argv[1] ?? '.'), '..', 'src', 'cli.js');
+}
+
+function parseShimDepth(raw?: string): number {
+  const parsed = Number.parseInt(raw ?? '0', 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+}
+
+function appendSkipDir(skipDirsEnv: string | undefined, dir: string): string {
+  const normalizedDir = dir.replace(/\/+$/, '');
+  if (!normalizedDir) return skipDirsEnv ?? '';
+
+  const dirs = (skipDirsEnv ?? '')
+    .split(':')
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+  if (!dirs.includes(normalizedDir)) {
+    dirs.push(normalizedDir);
+  }
+
+  return dirs.join(':');
 }
 
 function startCodexApprovalWatcher(logPath: string, cli: string): () => void {
@@ -53,8 +79,15 @@ function startCodexApprovalWatcher(logPath: string, cli: string): () => void {
 }
 
 export async function runAgentCommand(args: RunAgentArgs): Promise<number> {
+  const shimDepth = parseShimDepth(process.env[SHIM_DEPTH_ENV]);
+  if (shimDepth > MAX_SHIM_DEPTH) {
+    console.error('aing-notify: detected recursive shim invocation, aborting to avoid infinite loop');
+    return 125;
+  }
+
   const shimDir = process.env.AING_NOTIFY_SHIM_DIR ?? '';
-  const resolved = findRealBinary(args.agent, process.env.PATH ?? '', shimDir);
+  const skipDirsEnv = process.env[SKIP_DIRS_ENV] ?? '';
+  const resolved = findRealBinary(args.agent, process.env.PATH ?? '', shimDir, undefined, skipDirsEnv, true);
 
   if (!resolved) {
     console.error(`aing-notify: unable to find real binary for '${args.agent}' in PATH`);
@@ -65,6 +98,9 @@ export async function runAgentCommand(args: RunAgentArgs): Promise<number> {
     cliPath: cliPath(),
     cwd: process.cwd()
   });
+
+  injection.env[SHIM_DEPTH_ENV] = String(shimDepth + 1);
+  injection.env[SKIP_DIRS_ENV] = appendSkipDir(injection.env[SKIP_DIRS_ENV] ?? skipDirsEnv, dirname(resolved));
 
   if (injection.prepare) {
     await injection.prepare();
