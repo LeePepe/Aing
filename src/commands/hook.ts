@@ -2,7 +2,7 @@ import defaults from '../../config/defaults.json' with { type: 'json' };
 import { execFile } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
@@ -72,6 +72,21 @@ async function readLastAssistantText(transcriptPath: string): Promise<string | n
       }
     }
     return lastText;
+  } catch {
+    return null;
+  }
+}
+
+async function readLastCopilotResponse(sessionId: string): Promise<string | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return null;
+  const dbPath = join(homedir(), '.copilot', 'session-store.db');
+  try {
+    const { stdout } = await execFileAsync(
+      'sqlite3',
+      [dbPath, `SELECT assistant_response FROM turns WHERE session_id = '${sessionId}' ORDER BY turn_index DESC LIMIT 1;`],
+      { timeout: 3000 }
+    );
+    return stdout.trim() || null;
   } catch {
     return null;
   }
@@ -238,6 +253,9 @@ export function createHookRunner(deps: HookRunnerDeps = {}) {
         const lastText = await readLastAssistantText(result.transcriptPath);
         const src = lastText ?? result.message ?? null;
         body = src ? truncate(lastSentence(src), 20) : defaults.titles.TaskCompleted;
+      } else if (args.agent === 'copilot' && result.sessionId) {
+        const lastText = await readLastCopilotResponse(result.sessionId);
+        body = lastText ? truncate(lastSentence(lastText), 20) : defaults.titles.TaskCompleted;
       } else {
         body = result.message ? truncate(lastSentence(result.message), 20) : defaults.titles.TaskCompleted;
       }
