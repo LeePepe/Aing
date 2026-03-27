@@ -1,16 +1,23 @@
 # aing-notify
 
-A standalone notification bridge for AI coding CLIs.
+[![CI](https://github.com/LeePepe/Aing/actions/workflows/ci.yml/badge.svg)](https://github.com/LeePepe/Aing/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
+[![npm version](https://img.shields.io/badge/version-0.1.0-blue)](package.json)
+
+A standalone notification bridge for AI coding CLIs — stay informed without watching the terminal.
 
 It sends macOS notifications when an agent:
 - needs your decision (`DecisionRequired`)
 - finishes a task turn (`TaskCompleted`)
 
-Supported agents in v1:
-- `codex`
-- `claude`
-- `opencode`
-- `copilot`
+Supported agents:
+| Agent | TaskCompleted | DecisionRequired |
+|-------|:---:|:---:|
+| [Claude Code](https://claude.ai/code) | ✅ | ✅ |
+| [Codex](https://github.com/openai/codex) | ✅ | ✅ |
+| [OpenCode](https://github.com/sst/opencode) | ✅ | ✅ |
+| [GitHub Copilot](https://github.com/features/copilot) | ✅ | ✅ |
 
 ## Requirements
 

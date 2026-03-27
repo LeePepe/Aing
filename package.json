@@ -1,7 +1,7 @@
 {
   "name": "aing-notify",
   "version": "0.1.0",
-  "description": "",
+  "description": "A standalone notification bridge for AI coding CLIs (Claude, Codex, OpenCode, Copilot)",
   "main": "index.js",
   "directories": {
     "doc": "docs"
@@ -11,9 +11,26 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "claude",
+    "codex",
+    "opencode",
+    "copilot",
+    "notification",
+    "macos",
+    "ai",
+    "cli"
+  ],
+  "author": "LeePepe",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LeePepe/Aing.git"
+  },
+  "homepage": "https://github.com/LeePepe/Aing#readme",
+  "bugs": {
+    "url": "https://github.com/LeePepe/Aing/issues"
+  },
   "type": "module",
   "bin": {
     "aing-notify": "bin/aing-notify.js"
