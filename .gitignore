@@ -3,3 +3,6 @@ dist/
 .DS_Store
 .codex.env
 .claude/settings.json
+docs/superpowers/
+scripts/codex-personal-linear.sh
+.github/hooks/*.json
