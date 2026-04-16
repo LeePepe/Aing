@@ -31,7 +31,7 @@ npm install
 npm run build
 ```
 
-Install integrations (`codex/opencode/copilot` shims in `~/.local/bin`, Claude global hooks in `~/.claude/settings.json`):
+Install integrations (`codex/opencode/copilot` hooks in `~/.local/bin`, Claude global hooks in `~/.claude/settings.json`):
 
 ```bash
 node dist/src/cli.js install --agents codex,claude,opencode,copilot
@@ -170,7 +170,7 @@ Each notification follows the format:
 
 **Click behavior:** clicking the notification activates the terminal app that spawned the agent.
 
-**Deduplication:** repeated identical events within the TTL window (default 2 minutes) fire only one notification.
+**Deduplication:** repeated identical events within the TTL window (default 8 seconds) fire only one notification.
 
 ## Bark support
 
